@@ -22,11 +22,11 @@ export class PeerNode {
       Object.assign(this, { nodeId, service, bus, defaultTimeout });
       this.errorHandler = typeof errorHandler === 'function' ? errorHandler : null;
    }
-   
-      /* ──────────────── lifecycle ──────────────── */
-      async connect() { if (typeof this.bus.connect === 'function') await this.bus.connect(); }
-      async close() { if (typeof this.bus.close === 'function') await this.bus.close(); }
-   
+
+   /* ──────────────── lifecycle ──────────────── */
+   async connect() { if (typeof this.bus.connect === 'function') await this.bus.connect(); }
+   async close() { if (typeof this.bus.close === 'function') await this.bus.close(); }
+
 
    /* ───────────── unified verb ───────────── */
    /**
@@ -46,7 +46,124 @@ export class PeerNode {
    }
 
    /* ───────────── subscriptions ───────────── */
-   on(pattern, handler) { return this.bus.subscribe(pattern, handler); }
+   /**
+    * Subscribe to a subject.
+    *
+    * Overloads:
+    *    on(pattern, handler)                       – legacy, matches every verb
+    *    on(method, pattern, handler)               – verb-aware
+    *
+    * Both forms accept *relative* patterns that start with "/".
+    * A relative pattern is automatically expanded to:  n<id>/<service>/<pattern>.
+    * If a caller tries to subscribe to a foreign subject unintentionally
+    * (absolute path that does **not** start with this node’s prefix) the
+    * process terminates – this is almost certainly a configuration error.
+    *
+    * @param {string} methodOrPattern   – verb or pattern depending on overload
+    * @param {string|function} [patternOrHandler]
+    * @param {function} [maybeHandler]
+    * @returns {any}  adapter-specific subscription object
+    */
+   on(methodOrPattern, patternOrHandler, maybeHandler) {
+      /* ---------- overload resolution ---------- */
+      let verb = '*';                  // "*" = match any verb
+      let pattern;
+      let handler;
+
+      const allowedVerbs = new Set([
+         'get', 'post', 'put', 'patch', 'delete',
+         'set', 'call', 'flow', '*'
+      ]);
+
+      if (typeof patternOrHandler === 'function') {
+         // Legacy form: on(pattern, handler)
+         pattern = methodOrPattern;
+         handler = patternOrHandler;
+      } else {
+         // Verb-aware form: on(verb, pattern, handler)
+         verb = String(methodOrPattern).toLowerCase();
+         if (!allowedVerbs.has(verb)) {
+            throw new Error(`Unknown verb "${verb}" for on()`);
+         }
+         pattern = patternOrHandler;
+         handler = maybeHandler;
+         if (typeof handler !== 'function') {
+            throw new Error('Handler function is required');
+         }
+      }
+
+      /* ---------- pattern normalisation ---------- */
+      const selfPrefix = `${this.nodeId}/${this.service}`;
+      if (pattern.startsWith('/')) {
+         // Relative form → expand to absolute
+         pattern = `${selfPrefix}${pattern}`;
+      }
+
+      /* ---------- safety check ---------- */
+      if (!pattern.startsWith(selfPrefix)) {
+         // The user *probably* made a mistake – hard fail is safer.
+         console.error(
+            `[PeerNode] Illegal subscription to foreign subject "${pattern}". ` +
+            `This node is "${selfPrefix}". Shutting down.`,
+         );
+         process.exit(1);
+      }
+
+      /* ---------- subscribe via bus ---------- */
+      return this.bus.subscribe(pattern, async (data, rawMsg) => {
+         // Determine requested verb from headers (absent → “*”)
+         const reqVerb =
+            rawMsg.headers?.get('method')?.toLowerCase?.() || '*';
+
+         if (verb !== '*' && verb !== reqVerb) {
+            // Wrong verb – reply with error (if a reply is expected) and log.
+            const errMsg =
+               `Method ${reqVerb.toUpperCase()} not allowed for ${pattern}`;
+            if (rawMsg.reply && rawMsg.headers?.get('expectReply') === '1') {
+               // Use our own makeHeaders helper so traceId stays consistent.
+               const headers = this.#makeHeaders(
+                  'error', false, { status: 405 }
+               );
+               await this.bus.publish(
+                  rawMsg.reply,
+                  { error: errMsg },
+                  { headers }
+               );
+            }
+            await logError(errMsg);
+            return; // Do not invoke the user handler.
+         }
+
+         /* ---------- happy path ---------- */
+         try {
+            return await handler(data, rawMsg);
+         } catch (err) {
+            // Handler threw – log and answer with 500 if necessary, never crash.
+            await this.#handleError(err);
+            if (rawMsg.reply && rawMsg.headers?.get('expectReply') === '1') {
+               const headers = this.#makeHeaders(
+                  'error', false, { status: 500 }
+               );
+               return { error: err.message ?? 'Internal server error' };
+            }
+         }
+      });
+   }
+
+   /**
+    * Explicitly subscribe to a *foreign* subject.  Use with care.
+    *
+    * @param {string} pattern   absolute NATS subject, wildcards allowed
+    * @param {function} handler
+    */
+   onExternal(pattern, handler) {
+      if (!/^n\d+\/[A-Za-z0-9_-]+\/.+/.test(pattern)) {
+         throw new Error(
+            `External pattern must be absolute (n<id>/<service>/path), got "${pattern}"`
+         );
+      }
+      return this.bus.subscribe(pattern, handler);
+   }
 
    /* ───────────── private helpers ───────────── */
 

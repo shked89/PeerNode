@@ -15,7 +15,9 @@ const main = async () => {
    /* ---------- GC: business logic ---------- */
    const db = {};               // simple "in-memory DB"
 
-   gc.on('n1/gc/unit/exp/add', async ({ unitId, exp }) => {
+   // gc.on('n1/gc/unit/exp/add', ...
+   // OR 
+   gc.on('/unit/exp/add', async ({ unitId, exp }) => {
       const stats = (db[unitId] ??= { level: 1, exp: 0 });
       stats.exp += exp;
 
