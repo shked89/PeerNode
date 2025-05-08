@@ -3,6 +3,14 @@ import { BusAdapter } from './adapters/BusAdapter.js';
 import { NatsAdapter } from './adapters/NatsAdapter.js';
 import { logError } from './utils/logger.js';
 
+// ───────────── constants ─────────────
+const ALL_SYNC_METHODS = ['get', 'post', 'put', 'patch', 'delete'];
+const ALL_ASYNC_METHODS = ['set', 'call', 'flow', 'note'];
+
+const ALLOWED_SYNC_METHODS = new Set(ALL_SYNC_METHODS);
+const ALLOWED_ASYNC_METHODS = new Set(ALL_ASYNC_METHODS);
+const ALLOWED_METHODS = new Set([...ALL_SYNC_METHODS, ...ALL_ASYNC_METHODS, '*']);
+
 /**
  * PeerNode – faсade over a message bus providing REST‑like verbs (sync)
  * and event verbs (async). Default transport is pure NATS but any
@@ -37,11 +45,12 @@ export class PeerNode {
     */
    send(method, url, payload = {}, opts = {}) {
       method = String(method).toLowerCase();
-      const syncVerbs = new Set(['get', 'post', 'put', 'patch', 'delete']);
-      const asyncVerbs = new Set(['set', 'call', 'flow']);
-
-      if (syncVerbs.has(method)) return this.#sync(method, url, payload, opts);
-      if (asyncVerbs.has(method)) return this.#async(method, url, payload, opts);
+      if (ALLOWED_SYNC_METHODS.has(method)) {
+         return this.#sync(method, url, payload, opts);
+      }
+      if (ALLOWED_ASYNC_METHODS.has(method)) {
+         return this.#async(method, url, payload, opts);
+      }
       throw new Error(`Unknown verb "${method}"`);
    }
 
@@ -70,11 +79,6 @@ export class PeerNode {
       let pattern;
       let handler;
 
-      const allowedVerbs = new Set([
-         'get', 'post', 'put', 'patch', 'delete',
-         'set', 'call', 'flow', '*'
-      ]);
-
       if (typeof patternOrHandler === 'function') {
          // Legacy form: on(pattern, handler)
          pattern = methodOrPattern;
@@ -82,7 +86,7 @@ export class PeerNode {
       } else {
          // Verb-aware form: on(verb, pattern, handler)
          verb = String(methodOrPattern).toLowerCase();
-         if (!allowedVerbs.has(verb)) {
+         if (!ALLOWED_METHODS.has(verb)) {
             throw new Error(`Unknown verb "${verb}" for on()`);
          }
          pattern = patternOrHandler;
@@ -110,44 +114,34 @@ export class PeerNode {
       }
 
       /* ---------- subscribe via bus ---------- */
-      return this.bus.subscribe(pattern, async (data, rawMsg) => {
+      this.bus.subscribe(pattern, async (data, rawMsg) => {
          // Determine requested verb from headers (absent → “*”)
-         const reqVerb =
-            rawMsg.headers?.get('method')?.toLowerCase?.() || '*';
+         const reqVerb = rawMsg.headers?.get('method')?.toLowerCase?.() || '*';
 
          if (verb !== '*' && verb !== reqVerb) {
             // Wrong verb – reply with error (if a reply is expected) and log.
-            const errMsg =
-               `Method ${reqVerb.toUpperCase()} not allowed for ${pattern}`;
+            const errMsg = `Method ${reqVerb.toUpperCase()} not allowed for ${pattern}`;
             if (rawMsg.reply && rawMsg.headers?.get('expectReply') === '1') {
                // Use our own makeHeaders helper so traceId stays consistent.
-               const headers = this.#makeHeaders(
-                  'error', false, { status: 405 }
-               );
-               await this.bus.publish(
-                  rawMsg.reply,
-                  { error: errMsg },
-                  { headers }
-               );
+               const headers = this.#makeHeaders('error', false, { status: 405 });
+               await this.bus.publish(rawMsg.reply, { error: errMsg }, { headers });
             }
             await logError(errMsg);
-            return; // Do not invoke the user handler.
+            return;
          }
 
-         /* ---------- happy path ---------- */
          try {
             return await handler(data, rawMsg);
          } catch (err) {
-            // Handler threw – log and answer with 500 if necessary, never crash.
             await this.#handleError(err);
             if (rawMsg.reply && rawMsg.headers?.get('expectReply') === '1') {
-               const headers = this.#makeHeaders(
-                  'error', false, { status: 500 }
-               );
+               const headers = this.#makeHeaders('error', false, { status: 500 });
                return { error: err.message ?? 'Internal server error' };
             }
          }
       });
+
+      return this;
    }
 
    /**
@@ -162,7 +156,8 @@ export class PeerNode {
             `External pattern must be absolute (n<id>/<service>/path), got "${pattern}"`
          );
       }
-      return this.bus.subscribe(pattern, handler);
+      this.bus.subscribe(pattern, handler);
+      return this
    }
 
    /* ───────────── private helpers ───────────── */
