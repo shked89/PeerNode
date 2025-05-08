@@ -142,3 +142,6 @@ dist
 error.log
 logs
 project.txt
+
+#other
+scripts
