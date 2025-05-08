@@ -1,36 +1,48 @@
-//--- File: examples/demo_full_test.js ---//
-
 import { PeerNode } from '../src/index.js';
 
-const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const wait = ms => new Promise(r => setTimeout(r, ms));
 
 const main = async () => {
-   const ag = new PeerNode({ nodeId: 'n1', service: 'ag' }); // Sender (API Gateway)
-   const ds = new PeerNode({ nodeId: 'n2', service: 'ds' }); // Receiver (DataService)
+   // GC – game-controller
+   const gc = new PeerNode({ nodeId: 'n1', service: 'gc' });
 
-   await Promise.all([ag.connect(), ds.connect()]);
+   // AG – api-gateway
+   const ag = new PeerNode({ nodeId: 'n1', service: 'ag' });
 
-   // Setup a subscriber to handle incoming player stats update requests
-   ds.on('n1/ag/ds/player/stats', async (req) => {
-      console.log('DataService received request:', req);
-      const { playerId, action } = req;
+   // open connections in parallel
+   await Promise.all([gc.connect(), ag.connect()]);
 
-      // Mock player stats processing
-      if (action === 'level_up') {
-         return { playerId, newLevel: 43, score: 9050 };
+   /* ---------- GC: business logic ---------- */
+   const db = {};               // simple "in-memory DB"
+
+   gc.on('n1/gc/unit/exp/add', async ({ unitId, exp }) => {
+      const stats = (db[unitId] ??= { level: 1, exp: 0 });
+      stats.exp += exp;
+
+      // every 100 exp → +1 level
+      while (stats.exp >= 100) {
+         stats.exp -= 100;
+         stats.level += 1;
       }
-
-      return { playerId, newLevel: 42, score: 9000 };
+      return { unitId, ...stats };
    });
 
-   await wait(500); // Give subscriptions time to initialize
+   await wait(100); // let the subscriber take 
 
-   // Send a synchronous GET request
-   const payload = { playerId: 42, action: 'level_up' };
-   const playerStats = await ag.get('ds/player/stats', payload);
-   console.log('API Gateway received response:', playerStats);
+   /* ---------- AG: we send requests ---------- */
+   const res1 = await ag.send('post', 'n1/gc/unit/exp/add', {
+      unitId: 'U42',
+      exp: 50
+   });
+   console.log('After +50 exp →', res1);     // { level:1, exp:50 }
 
-   await Promise.all([ag.close(), ds.close()]);
+   const res2 = await ag.send('post', 'n1/gc/unit/exp/add', {
+      unitId: 'U42',
+      exp: 70
+   });
+   console.log('After +70 exp →', res2);     // { level:2, exp:20 }
+
+   await Promise.all([ag.close(), gc.close()]);
 };
 
 main().catch(console.error);

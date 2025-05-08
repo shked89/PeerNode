@@ -19,45 +19,44 @@ export class PeerNode {
     */
    constructor({ nodeId, service, bus = new NatsAdapter(), defaultTimeout = 1_000, errorHandler = null }) {
       if (!nodeId || !service) throw new Error('nodeId and service are required');
-      this.nodeId = nodeId;
-      this.service = service;
-      this.bus = bus;
-      this.defaultTimeout = defaultTimeout;
+      Object.assign(this, { nodeId, service, bus, defaultTimeout });
       this.errorHandler = typeof errorHandler === 'function' ? errorHandler : null;
    }
+   
+      /* ──────────────── lifecycle ──────────────── */
+      async connect() { if (typeof this.bus.connect === 'function') await this.bus.connect(); }
+      async close() { if (typeof this.bus.close === 'function') await this.bus.close(); }
+   
 
-   /* ──────────────── lifecycle ──────────────── */
-   async connect() { if (typeof this.bus.connect === 'function') await this.bus.connect(); }
-   async close() { if (typeof this.bus.close === 'function') await this.bus.close(); }
-
-   /* ──────────────── sync verbs (await reply) ──────────────── */
-   get(url, payload = {}, opts = {}) { return this.#sync('get', url, payload, opts); }
-   post(url, payload = {}, opts = {}) { return this.#sync('post', url, payload, opts); }
-   put(url, payload = {}, opts = {}) { return this.#sync('put', url, payload, opts); }
-   patch(url, payload = {}, opts = {}) { return this.#sync('patch', url, payload, opts); }
-   delete(url, payload = {}, opts = {}) { return this.#sync('delete', url, payload, opts); }
-
-   /* ──────────────── async verbs (fire‑and‑forget) ──────────────── */
-   set(url, payload = {}, opts = {}) { return this.#async('set', url, payload, opts); }
-   call(url, payload = {}, opts = {}) { return this.#async('call', url, payload, opts); }
-   flow(url, payload = {}, opts = {}) { return this.#async('flow', url, payload, opts); }
-
+   /* ───────────── unified verb ───────────── */
    /**
-    * Subscribe to inbound messages.
-    * @param {string}   pattern  subject or wildcard pattern.
-    * @param {Function} handler  (data, rawMsg)=>any | Promise<any>
+    * @param {"get"|"post"|"put"|"patch"|"delete"|"set"|"call"|"flow"} method
+    * @param {string} url n<id>/<service>/<path>
+    * @param {any} [payload]
+    * @param {object} [opts]
     */
-   on(pattern, handler) { return this.bus.subscribe(this.#subject(pattern), handler); }
+   send(method, url, payload = {}, opts = {}) {
+      method = String(method).toLowerCase();
+      const syncVerbs = new Set(['get', 'post', 'put', 'patch', 'delete']);
+      const asyncVerbs = new Set(['set', 'call', 'flow']);
 
-   /* ──────────────── private helpers ──────────────── */
-
-   /** Build absolute NATS subject from a possibly relative URL. */
-   #subject(url) {
-      if (url.startsWith('n')) return url; // already absolute, e.g. n2/gc/foo
-      return `${this.nodeId}/${this.service}/${url.replace(/^\/+/, '')}`;
+      if (syncVerbs.has(method)) return this.#sync(method, url, payload, opts);
+      if (asyncVerbs.has(method)) return this.#async(method, url, payload, opts);
+      throw new Error(`Unknown verb "${method}"`);
    }
 
-   /** Common headers for every outgoing message. */
+   /* ───────────── subscriptions ───────────── */
+   on(pattern, handler) { return this.bus.subscribe(pattern, handler); }
+
+   /* ───────────── private helpers ───────────── */
+
+   #assertAbsolute(url) {
+      if (!/^n\d+\/[A-Za-z0-9_-]+\/.+/.test(url)) {
+         throw new Error(`URL must be absolute (format n<id>/<service>/path), got "${url}"`);
+      }
+      return url;
+   }
+
    #makeHeaders(method, expectReply, extra = {}) {
       return {
          method,
@@ -68,32 +67,17 @@ export class PeerNode {
       };
    }
 
-   /**
-    * Unified sync request.
-    * Supports per‑call `opts.onError(err)` callback.
-    */
-   #sync(method, url, payload, opts = {}) {
+   #sync(method, url, payload, opts) {
       const headers = this.#makeHeaders(method, true, opts.headers);
       const timeout = opts.timeout ?? this.defaultTimeout;
-      return this.bus
-         .request(this.#subject(url), payload, { headers, timeout })
-         .catch(async (err) => {
-            await this.#handleError(err, opts.onError);
-            throw err;
-         });
+      return this.bus.request(this.#assertAbsolute(url), payload, { headers, timeout })
+         .catch(err => this.#handleError(err, opts.onError));
    }
 
-   /**
-    * Unified async publish (fire‑and‑forget).
-    */
-   #async(method, url, payload, opts = {}) {
+   #async(method, url, payload, opts) {
       const headers = this.#makeHeaders(method, false, opts.headers);
-      return this.bus
-         .publish(this.#subject(url), payload, { headers })
-         .catch(async (err) => {
-            await this.#handleError(err, opts.onError);
-            throw err;
-         });
+      return this.bus.publish(this.#assertAbsolute(url), payload, { headers })
+         .catch(err => this.#handleError(err, opts.onError));
    }
 
    /**
