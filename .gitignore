@@ -54,6 +54,9 @@ web_modules/
 # Optional eslint cache
 .eslintcache
 
+# Optional
+.DS_Store
+
 # Optional stylelint cache
 .stylelintcache
 
@@ -134,3 +137,8 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+#Logs 
+error.log
+logs
+project.txt
