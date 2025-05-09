@@ -5,7 +5,10 @@ import { logError } from './utils/logger.js';
 
 // ───────────── constants ─────────────
 const ALL_SYNC_METHODS = ['get', 'post', 'put', 'patch', 'delete'];
-const ALL_ASYNC_METHODS = ['set', 'call', 'flow', 'note'];
+const ALL_ASYNC_METHODS = [
+   'start', 'step', 'finish', 'fail', 'cancel', // like state machine
+   'call', 'emit'
+];
 
 const ALLOWED_SYNC_METHODS = new Set(ALL_SYNC_METHODS);
 const ALLOWED_ASYNC_METHODS = new Set(ALL_ASYNC_METHODS);
