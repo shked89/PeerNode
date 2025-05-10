@@ -13,7 +13,7 @@ const main = async () => {
    }));
 
    // 2) +2×30 exp
-   console.log(await ag.send('post', 'n1/gc/unit/expDouble/add', {
+   console.log(await ag.send('post', 'n1/gc/unit/exp_double/add', {
       unitId: 'U42', exp: 30
    }));
 

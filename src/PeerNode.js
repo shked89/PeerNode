@@ -50,6 +50,7 @@ export class PeerNode {
     */
    send(method, url, payload = {}, opts = {}) {
       method = String(method).toLowerCase();
+      url = String(url).toLowerCase();
       if (ALLOWED_SYNC_METHODS.has(method)) {
          return this.#sync(method, url, payload, opts);
       }

@@ -29,7 +29,7 @@ const main = async () => {
       return { unitId, ...stats };
    });
 
-   gc.on('/unit/expDouble/add', async (ctx) => {
+   gc.on('/unit/exp_double/add', async (ctx) => {
       const { unitId, exp } = ctx.payload;
       const stats = (db[unitId] ??= { level: 1, exp: 0 });
 
@@ -59,7 +59,7 @@ const main = async () => {
    console.log('After +70  exp →', res2);     // { level:2, exp:20 }
 
 
-   const res3 = await ag.send('post', 'n1/gc/unit/expDouble/add', {
+   const res3 = await ag.send('post', 'n1/gc/unit/exp_double/add', {
       unitId: 'U42',
       exp: 52.5
    });

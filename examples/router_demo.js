@@ -36,8 +36,8 @@ const main = async () => {
          log(ctx, 'XP added', { unitId, exp, state: s });
          return { unitId, ...s };
       })
-      /* ────── POST /unit/expDouble/add ────── */
-      .use('post', '/unit/expDouble/add', async (ctx) => {
+      /* ────── POST /unit/exp_double/add ────── */
+      .use('post', '/unit/exp_double/add', async (ctx) => {
          const { unitId, exp } = ctx.payload;
          const s = (db[unitId] ??= { level: 1, exp: 0 });
          s.exp += exp * 2;
