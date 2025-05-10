@@ -13,18 +13,18 @@ const main = async () => {
    const router = new NodeRouter();
 
    router
-      .use('post', '/unit/exp/add', async ({ unitId, exp }) => {
+      .use('post', '/unit/exp/add', async (ctx, { unitId, exp }) => {
          console.log('post', '/unit/exp/add', unitId, exp);
          /* … business logic … */
          return { status: 'ok', url: '/unit/exp/add' }
       })
-      .use('post', '/unit/expDouble/add', async ({ unitId, exp }) => {
+      .use('post', '/unit/expDouble/add', async (ctx, { unitId, exp }) => {
          console.log('post', '/unit/expDouble/add', unitId, exp);
          /* … business logic … */
          return { status: 'ok', url: '/unit/expDouble/add' }
       })
       .use('get', '/health', () => ({ status: 'ok' }))
-      .use('*', '/debug', ({ foo }) => ({ echo: foo }));
+      .use('*', '/debug', (ctx, { foo }) => ({ echo: foo }));
 
    /* -------- bind to PeerNode -------- */
    router.apply(node);

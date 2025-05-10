@@ -13,8 +13,8 @@ export class NodeRouter {
    /**
     * Register a handler for a (method, url) pair.
     *
-    * @param {"get"|"post"|"put"|"patch"|"delete"|"*"} method – case-insensitive
-    * @param {string} url  – starts with "/", relative to the peer prefix
+    * @param {string} method - case-insensitive
+    * @param {string} url  - starts with "/", relative to the peer prefix
     * @param {(data:any, rawMsg:any)=>any|Promise<any>} handler
     * @returns {NodeRouter}  for chaining
     */
@@ -41,8 +41,27 @@ export class NodeRouter {
     */
    apply(peer) {
       for (const [url, methods] of this.routes) {
-         for (const [method, fn] of methods) {
-            peer.on(method, url, fn);
+         for (const [method, handler] of methods) {
+            peer.on(method, url, (payload, msg) => {
+               // Build lightweight context
+               const ctx = {
+                  url,                          // "/unit/exp/add"
+                  subject: msg.subject,         // "n1/gc/unit/exp/add"
+                  method: msg.headers?.get('method') ?? '*',
+                  headers: Object.fromEntries(msg.headers ?? []),
+                  traceId: msg.headers?.get('traceId'),
+                  payload,                      // alias for convenience
+                  raw: msg,
+                  reply: (data, hdr = {}) =>
+                     msg.reply &&
+                     peer.bus.publish(msg.reply, data, { headers: hdr }),
+               };
+
+               // Call user handler: (ctx) or (ctx, payload)
+               return handler.length >= 2
+                  ? handler(ctx, payload) // ctx, payload
+                  : handler(ctx);         // ctx only
+            });
          }
       }
    }

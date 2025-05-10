@@ -1,5 +1,5 @@
-// A minimal client
-// ────────────────────────────────────────
+// Minimal client for ctx-first NodeRouter demo
+// ────────────────────────────────────────────
 import { PeerNode } from '../src/index.js';
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -19,22 +19,32 @@ const main = async () => {
       unitId: 'U42',
       exp: 50
    });
-   console.log('POST /unit/exp/add  →', res1);
+   console.log('POST /unit/exp/add          →', res1);
 
    // 2. Add double XP (2 × 30)
    const res2 = await ag.send('post', 'n1/gc/unit/expDouble/add', {
       unitId: 'U42',
       exp: 30
    });
-   console.log('POST /unit/expDouble/add →', res2);
+   console.log('POST /unit/expDouble/add    →', res2);
 
    // 3. Health-check
    const health = await ag.send('get', 'n1/gc/health');
-   console.log('GET  /health →', health);
+   console.log('GET  /health                →', health);
 
-   // 4. Debug route (verb-agnostic, method wildcard)
+   // 4. Debug route (method wildcard)
    const debug = await ag.send('put', 'n1/gc/debug', { foo: 'bar' });
-   console.log('PUT  /debug  →', debug);
+   console.log('PUT  /debug                 →', debug);
+
+   /* ---------- headers demo ---------- */
+   // Custom header – will appear in ctx.headers on the server side
+   const custom = await ag.send(
+      'post',
+      'n1/gc/debug',
+      { ping: 'pong' },
+      { headers: { 'x-client': 'router_client_demo' } }
+   );
+   console.log('POST /debug (custom header) →', custom);
 
    await ag.close();
 };
