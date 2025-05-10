@@ -20,6 +20,7 @@ export class NodeRouter {
     */
    use(method, url, handler) {
       method = String(method).toLowerCase();
+      url = String(url).toLowerCase();
       if (typeof handler !== 'function') {
          throw new TypeError('Handler must be a function');
       }

@@ -30,7 +30,9 @@ export class PeerNode {
     */
    constructor({ nodeId, service, bus = new NatsAdapter(), defaultTimeout = 1_000, errorHandler = null }) {
       if (!nodeId || !service) throw new Error('nodeId and service are required');
-      Object.assign(this, { nodeId, service, bus, defaultTimeout });
+      this.nodeId = String(nodeId).toLowerCase();
+      this.service = String(service).toLowerCase();
+      Object.assign(this, { bus, defaultTimeout });
       this.errorHandler = typeof errorHandler === 'function' ? errorHandler : null;
    }
 
@@ -95,10 +97,11 @@ export class PeerNode {
       }
 
       // Normalize to absolute subject
-      const prefix = `${this.nodeId}/${this.service}`;
+      const prefix = `${this.nodeId}/${this.service}`.toLowerCase();
       if (pattern.startsWith('/')) {
          pattern = `${prefix}${pattern}`;
       }
+      pattern = pattern.toLowerCase();
       if (!pattern.startsWith(prefix)) {
          console.error(
             `[PeerNode] Illegal subscription to foreign subject "${pattern}". ` +
@@ -147,7 +150,7 @@ export class PeerNode {
 
       return this;
    }
-   
+
    /**
     * Normalize incoming payload into a plain object.
     *
