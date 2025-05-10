@@ -20,10 +20,10 @@ const main = async () => {
    // 3) health
    console.log(await ag.send('get', 'n1/gc/health'));
 
-   // 4) debug with custom header
-   console.log(await ag.send('put', 'n1/gc/debug',
-      { foo: 'bar' }, { headers: { 'x-client': 'demo' } })
-   );
+   // TODO 4) debug with custom header
+   // console.log(await ag.send('put', 'n1/gc/debug',
+   //    { foo: 'bar' }, { headers: { 'x-client': 'demo' } })
+   // );
 
    await ag.close();
 };

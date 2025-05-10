@@ -34,6 +34,10 @@ export class PeerNode {
       this.service = String(service).toLowerCase();
       Object.assign(this, { bus, defaultTimeout });
       this.errorHandler = typeof errorHandler === 'function' ? errorHandler : null;
+
+      // Track registered method+path combinations
+      this.routeSet = new Set();
+      this.routeBaseSet = new Set();
    }
 
    /* ──────────────── lifecycle ──────────────── */
@@ -51,13 +55,105 @@ export class PeerNode {
    send(method, url, payload = {}, opts = {}) {
       method = String(method).toLowerCase();
       url = String(url).toLowerCase();
-      if (ALLOWED_SYNC_METHODS.has(method)) {
-         return this.#sync(method, url, payload, opts);
-      }
-      if (ALLOWED_ASYNC_METHODS.has(method)) {
+      if (ALLOWED_METHODS.has(method)) {
          return this.#async(method, url, payload, opts);
       }
+      // if (ALLOWED_ASYNC_METHODS.has(method)) {
+      //    return this.#async(method, url, payload, opts);
+      // }
       throw new Error(`Unknown verb "${method}"`);
+   }
+
+   /**
+    * Internal handler for incoming messages.
+    * Builds a context (`ctx`) from raw data and invokes the registered route handler.
+    *
+    * Handles:
+    * - Reply expectation
+    * - Route existence check
+    * - Centralized error handling
+    *
+    * @param {any} data - Parsed message payload
+    * @param {any} rawMsg - Original NATS message object
+    * @param {string} prefix - Subject prefix (e.g., "n1/gc")
+    * @param {Function} handler - Registered handler for the route
+    */
+   async #onMsg(data, rawMsg, prefix, handler) {
+      const headers = {};
+      if (rawMsg?.headers) {
+         for (const key of rawMsg.headers.keys()) {
+            headers[key] = rawMsg.headers.get(key);
+         }
+      }
+      const subject = rawMsg.subject
+
+      // Build context object
+      const ctx = {
+         // url: headers.url.replace(prefix, ''),
+         url: subject.replace(prefix, ''),
+         subject: subject,
+         method: headers.method,
+         headers: headers,
+         expectReply: headers.expectReply,
+         traceId: headers.traceId,
+         payload: this.parsePayload(data),
+         raw: rawMsg,
+         reply: (response, hdr = {}) =>
+            rawMsg.reply && this.bus.publish(rawMsg.reply, response, { headers: hdr }),
+      };
+
+      const routeKey = subject;
+
+      // If this route is not registered at all - 405
+      if (!this.routeSet.has(routeKey)) {
+         let errMsg = '';
+         if (rawMsg.reply && headers?.expectReply === '1') {
+            const headers = this.#makeHeaders('error', false, { status: 405 });
+            await this.bus.publish(rawMsg.reply, { error: errMsg }, { headers });
+         }
+         return logError(errMsg);
+      }
+
+      // One matching method should process the request
+      try {
+         return await handler(ctx);
+      } catch (err) {
+         await this.#handleError(err);
+         if (rawMsg.reply && rawMsg.headers?.get('expectReply') === '1') {
+            const headers = this.#makeHeaders('error', false, { status: 500 });
+            return { error: err.message ?? 'Internal server error' };
+         }
+      }
+   }
+
+   /**
+    * getRouteURLs
+    * @param {string} [method]
+    * @param {string} [pattern]
+    * @returns {object}  { prefix, prefix_url, prefix_url_method }
+    */
+   #getRouteURLs(method, pattern) {
+      const prefix = `${this.nodeId}/${this.service}`.toLowerCase(); // "n1/gc"
+      const prefix_url = pattern.startsWith('/') ? `${prefix}${pattern}` : pattern
+
+      if (!prefix_url.startsWith(prefix)) {
+         console.error(
+            `[PeerNode] Illegal subscription to foreign subject "${pattern}". ` +
+            `This node is "${prefix}". Exiting.`,
+         );
+         process.exit(1);
+      }
+
+      const prefix_url_method = method === '*' ? `${prefix_url}--all` : `${prefix_url}--${method}`
+
+      if (this.routeSet.has(prefix_url_method)) {
+         console.error(
+            "ERROR! This method has been registered! " + prefix_url_method
+         );
+         process.exit(1);
+      }
+
+      return { prefix, prefix_url, prefix_url_method }
    }
 
    /* ───────────── subscriptions ───────────── */
@@ -96,57 +192,28 @@ export class PeerNode {
             throw new Error('Handler function is required');
          }
       }
+      pattern = pattern.toLowerCase();
 
       // Normalize to absolute subject
-      const prefix = `${this.nodeId}/${this.service}`.toLowerCase();
-      if (pattern.startsWith('/')) {
-         pattern = `${prefix}${pattern}`;
-      }
-      pattern = pattern.toLowerCase();
-      if (!pattern.startsWith(prefix)) {
-         console.error(
-            `[PeerNode] Illegal subscription to foreign subject "${pattern}". ` +
-            `This node is "${prefix}". Exiting.`,
+      const { prefix, prefix_url, prefix_url_method } = this.#getRouteURLs(verb, pattern);
+
+      let subject;
+      if (verb === '*') {
+         // Subscribe with wildcard to match all verbs
+         // subject = `${prefix_url}-->`;                 // real NATS subject to listen
+         // this.routeSet.add(`${prefix_url}--all`);      // register route key
+
+         throw new Error(
+            `Wildcard method "*" is not supported in peer.on(). Use peer.onExternal("${prefix_url}-->", handler) instead.`
          );
-         process.exit(1);
+      } else {
+         subject = prefix_url_method;
+         this.routeSet.add(subject);
       }
 
       // Subscribe and wrap data+msg into a single ctx
-      this.bus.subscribe(pattern, async (data, rawMsg) => {
-         // Build context object
-         const ctx = {
-            url: rawMsg.subject.replace(prefix, ''),   // "/path"
-            subject: rawMsg.subject,
-            method: rawMsg.headers?.get('method') ?? '*',
-            headers: Object.fromEntries(rawMsg.headers ?? []),
-            traceId: rawMsg.headers?.get('traceId'),
-            payload: this.parsePayload(data),
-            raw: rawMsg,
-            reply: (response, hdr = {}) =>
-               rawMsg.reply && this.bus.publish(rawMsg.reply, response, { headers: hdr }),
-         };
-
-         // Verb check
-         const reqVerb = ctx.method.toLowerCase();
-         if (verb !== '*' && verb !== reqVerb) {
-            const errMsg = `Method ${reqVerb.toUpperCase()} not allowed for ${pattern}`;
-            if (rawMsg.reply && rawMsg.headers?.get('expectReply') === '1') {
-               const headers = this.#makeHeaders('error', false, { status: 405 });
-               await this.bus.publish(rawMsg.reply, { error: errMsg }, { headers });
-            }
-            return logError(errMsg);
-         }
-
-         // Call the user's handler with a single ctx argument
-         try {
-            return await handler(ctx);
-         } catch (err) {
-            await this.#handleError(err);
-            if (rawMsg.reply && rawMsg.headers?.get('expectReply') === '1') {
-               const headers = this.#makeHeaders('error', false, { status: 500 });
-               return { error: err.message ?? 'Internal server error' };
-            }
-         }
+      this.bus.subscribe(subject, async (data, rawMsg) => {
+         return this.#onMsg(data, rawMsg, prefix, handler);
       });
 
       return this;
@@ -183,8 +250,6 @@ export class PeerNode {
       return this
    }
 
-   /* ───────────── private helpers ───────────── */
-
    #assertAbsolute(url) {
       if (!/^n\d+\/[A-Za-z0-9_-]+\/.+/.test(url)) {
          throw new Error(`URL must be absolute (format n<id>/<service>/path), got "${url}"`);
@@ -192,9 +257,13 @@ export class PeerNode {
       return url;
    }
 
-   #makeHeaders(method, expectReply, extra = {}) {
+   #makeHeaders(method, expectReply, url, extra = {}) {
+      if (extra?.method) {
+         console.warn('⚠️ Overriding method in headers:', extra.method);
+      }
       return {
          method,
+         url,
          expectReply: expectReply ? '1' : '0',
          from: `${this.nodeId}/${this.service}`,
          traceId: crypto.randomUUID?.() || `${Date.now()}`,
@@ -202,17 +271,27 @@ export class PeerNode {
       };
    }
 
-   #sync(method, url, payload, opts) {
-      const headers = this.#makeHeaders(method, true, opts.headers);
+   /**
+    * Internal method to perform a request-reply interaction over the bus.
+    * 
+    * Constructs headers and invokes `bus.request()` on a derived subject.
+    * Automatically calls error handler if request fails.
+    *
+    * @param {string} method - HTTP-like method (e.g., "get", "patch")
+    * @param {string} url - Fully qualified subject (e.g., "n1/gc/unit")
+    * @param {any} payload - Message body
+    * @param {object} opts - Optional settings like timeout, headers, onError
+    * @returns {Promise<any>} Response or error wrapper
+    */
+   async #async(method, url, payload, opts) {
+      const headers = this.#makeHeaders(method, true, url, opts.headers);
       const timeout = opts.timeout ?? this.defaultTimeout;
-      return this.bus.request(this.#assertAbsolute(url), payload, { headers, timeout })
-         .catch(err => this.#handleError(err, opts.onError));
-   }
-
-   #async(method, url, payload, opts) {
-      const headers = this.#makeHeaders(method, false, opts.headers);
-      return this.bus.publish(this.#assertAbsolute(url), payload, { headers })
-         .catch(err => this.#handleError(err, opts.onError));
+      const fullUrl = `${this.#assertAbsolute(url)}--${method}`;
+      return await this.bus.request(fullUrl, payload, { headers, timeout })
+         .catch(err => {
+            this.#handleError(err, opts.onError)
+            return { status: parseInt(err.code || 500, 10) }
+         });
    }
 
    /**

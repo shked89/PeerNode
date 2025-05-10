@@ -36,9 +36,12 @@ export class NodeRouter {
    }
 
    /**
-    * Attach every registered route to a PeerNode instance.
+    * Apply all registered routes to a PeerNode instance.
     *
-    * @param {import('./PeerNode.js').PeerNode} peer
+    * For each (method, url) pair, it calls `peer.on(...)`
+    * so that the node starts listening to appropriate subjects.
+    *
+    * @param {import('./PeerNode.js').PeerNode} peer - The target PeerNode instance
     */
    apply(peer) {
       for (const url of Object.keys(this.routes)) {
@@ -49,4 +52,5 @@ export class NodeRouter {
          }
       }
    }
+   
 }

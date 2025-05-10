@@ -61,6 +61,14 @@ export class NatsAdapter extends BusAdapter {
       }
    }
 
+   /**
+    * Subscribe to a NATS subject and forward messages to the handler.
+    * Automatically decodes payloads and sends a reply if applicable.
+    *
+    * @param {string} subject - Full NATS subject
+    * @param {(data: any, rawMsg: any) => any|Promise<any>} handler - Handler function
+    * @returns {Subscription} NATS subscription object
+    */
    subscribe(subject, handler) {
       const sub = this.nc.subscribe(subject);
       (async () => {

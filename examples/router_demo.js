@@ -53,11 +53,11 @@ const main = async () => {
          return { ok: true };
       })
 
-      /* ────── * /debug ────── */
-      .use('*', '/debug', ctx => {
-         log(ctx, 'debug echo', ctx.payload);
-         return { echo: ctx.payload };
-      });
+      // /* ────── * /debug ────── */ TODO
+      // .use('*', '/debug', ctx => {
+      //    log(ctx, 'debug echo', ctx.payload);
+      //    return { echo: ctx.payload };
+      // });
 
    router.apply(gc);
    console.log('GC routes mounted and ready.');

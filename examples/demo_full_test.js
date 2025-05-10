@@ -16,7 +16,7 @@ const main = async () => {
    const db = {};               // simple "in-memory DB"
 
    // GC: business logic via context-first handlers
-   gc.on('/unit/exp/add', async (ctx) => {
+   gc.on('post', '/unit/exp/add', async (ctx) => {
       const { unitId, exp } = ctx.payload;
       const stats = (db[unitId] ??= { level: 1, exp: 0 });
       stats.exp += exp;
@@ -29,7 +29,7 @@ const main = async () => {
       return { unitId, ...stats };
    });
 
-   gc.on('/unit/exp_double/add', async (ctx) => {
+   gc.on('post', '/unit/exp_double/add', async (ctx) => {
       const { unitId, exp } = ctx.payload;
       const stats = (db[unitId] ??= { level: 1, exp: 0 });
 
@@ -42,6 +42,8 @@ const main = async () => {
       return { unitId, ...stats };
    });
 
+   console.log('🔍 Routes on gc:');
+   console.log([...gc.routeSet]);
 
    await wait(100); // let the subscriber take 
 
@@ -57,7 +59,6 @@ const main = async () => {
       exp: 70
    });
    console.log('After +70  exp →', res2);     // { level:2, exp:20 }
-
 
    const res3 = await ag.send('post', 'n1/gc/unit/exp_double/add', {
       unitId: 'U42',
