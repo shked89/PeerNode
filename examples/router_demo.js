@@ -26,7 +26,9 @@ const main = async () => {
 
    router
       /* ────── POST /unit/exp/add ────── */
-      .use('post', '/unit/exp/add', async (ctx, { unitId, exp }) => {
+      .use('post', '/unit/exp/add', async (ctx) => {
+         const { unitId, exp } = ctx.payload;
+
          const s = (db[unitId] ??= { level: 1, exp: 0 });
          s.exp += exp;
          while (s.exp >= 100) { s.exp -= 100; s.level++; }
@@ -34,9 +36,9 @@ const main = async () => {
          log(ctx, 'XP added', { unitId, exp, state: s });
          return { unitId, ...s };
       })
-
       /* ────── POST /unit/expDouble/add ────── */
-      .use('post', '/unit/expDouble/add', async (ctx, { unitId, exp }) => {
+      .use('post', '/unit/expDouble/add', async (ctx) => {
+         const { unitId, exp } = ctx.payload;
          const s = (db[unitId] ??= { level: 1, exp: 0 });
          s.exp += exp * 2;
          while (s.exp >= 100) { s.exp -= 100; s.level++; }

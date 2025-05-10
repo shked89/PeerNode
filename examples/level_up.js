@@ -9,7 +9,7 @@ const main = async () => {
 
    // DS handles GET /player/stats with a single ctx
    ds.on('get', '/player/stats', (ctx) => {
-      const { playerId, action } = ctx.payload ?? {};
+      const { playerId, action } = ctx.payload;
       console.log(
          `[${ctx.traceId}] GET /player/stats → playerId=${playerId}, action=${action}`
       );
@@ -22,6 +22,9 @@ const main = async () => {
          ? { playerId, newLevel: 43, score: 9050 }
          : { playerId, newLevel: 42, score: 9000 };
    });
+
+   // wait for subscription to be active 
+   await new Promise(r => setTimeout(r, 100));
 
    const stats = await ag.send('get', 'n1/ds/player/stats', {
       playerId: 42,

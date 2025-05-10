@@ -111,12 +111,12 @@ export class PeerNode {
       this.bus.subscribe(pattern, async (data, rawMsg) => {
          // Build context object
          const ctx = {
-            url: rawMsg.subject.replace(`${this.nodeId}/${this.service}`, ''), // e.g. "/player/stats"
+            url: rawMsg.subject.replace(prefix, ''),   // "/path"
             subject: rawMsg.subject,
             method: rawMsg.headers?.get('method') ?? '*',
             headers: Object.fromEntries(rawMsg.headers ?? []),
             traceId: rawMsg.headers?.get('traceId'),
-            payload: data,
+            payload: this.parsePayload(data),
             raw: rawMsg,
             reply: (response, hdr = {}) =>
                rawMsg.reply && this.bus.publish(rawMsg.reply, response, { headers: hdr }),
@@ -146,6 +146,21 @@ export class PeerNode {
       });
 
       return this;
+   }
+   
+   /**
+    * Normalize incoming payload into a plain object.
+    *
+    * - If `data` is a non-null object (including arrays), returns it unchanged.
+    * - Otherwise wraps the original primitive or missing value under `{ raw: … }`.
+    *   - `null` or `undefined` become `{ raw: null }`.
+    *   - Numbers, strings, booleans become `{ raw: 42 }`, `{ raw: "foo" }`, etc.
+    *
+    * @param {*} data  The raw payload received from the bus.
+    * @returns {object}  A guaranteed object for `ctx.payload`.
+    */
+   parsePayload(data) {
+      return data != null && typeof data === 'object' ? data : { raw: (data !== undefined ? data : null) }
    }
 
    /**
