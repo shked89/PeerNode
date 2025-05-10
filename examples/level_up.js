@@ -1,6 +1,12 @@
 // AG → DS "player stats" request
 // ─────────────────────────────────
 import { PeerNode } from '../src/index.js';
+import { setLogErrorHandler } from '../src/utils/logger.js';
+
+// Custom error logger 
+setLogErrorHandler(err => {
+   console.error('📣 CustomLog:', err);
+});
 
 const main = async () => {
    const ag = new PeerNode({ nodeId: 'n1', service: 'ag' });
