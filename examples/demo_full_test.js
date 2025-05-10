@@ -15,9 +15,9 @@ const main = async () => {
    /* ---------- GC: business logic ---------- */
    const db = {};               // simple "in-memory DB"
 
-   // gc.on('n1/gc/unit/exp/add', ...
-   // OR 
-   gc.on('/unit/exp/add', async ({ unitId, exp }) => {
+   // GC: business logic via context-first handlers
+   gc.on('/unit/exp/add', async (ctx) => {
+      const { unitId, exp } = ctx.payload;
       const stats = (db[unitId] ??= { level: 1, exp: 0 });
       stats.exp += exp;
 
@@ -27,18 +27,21 @@ const main = async () => {
          stats.level += 1;
       }
       return { unitId, ...stats };
-   })
-      //builder .on(...params).on(...params).on(...params)
-      .on('/unit/expDouble/add', async ({ unitId, exp }) => {
-         const stats = (db[unitId] ??= { level: 1, exp: 0 });
-         stats.exp += exp * 2;
+   });
 
-         while (stats.exp >= 100) {
-            stats.exp -= 100;
-            stats.level += 1;
-         }
-         return { unitId, ...stats };
-      })
+   gc.on('/unit/expDouble/add', async (ctx) => {
+      const { unitId, exp } = ctx.payload;
+      const stats = (db[unitId] ??= { level: 1, exp: 0 });
+
+      //exp Double
+      stats.exp += exp * 2;
+      while (stats.exp >= 100) {
+         stats.exp -= 100;
+         stats.level += 1;
+      }
+      return { unitId, ...stats };
+   });
+
 
    await wait(100); // let the subscriber take 
 

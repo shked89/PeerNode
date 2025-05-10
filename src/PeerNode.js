@@ -77,17 +77,12 @@ export class PeerNode {
     * @returns {any}  adapter-specific subscription object
     */
    on(methodOrPattern, patternOrHandler, maybeHandler) {
-      /* ---------- overload resolution ---------- */
-      let verb = '*';                  // "*" = match any verb
-      let pattern;
-      let handler;
-
+      // Overload resolution: (pattern, handler) or (method, pattern, handler)
+      let verb = '*', pattern, handler;
       if (typeof patternOrHandler === 'function') {
-         // Legacy form: on(pattern, handler)
          pattern = methodOrPattern;
          handler = patternOrHandler;
       } else {
-         // Verb-aware form: on(verb, pattern, handler)
          verb = String(methodOrPattern).toLowerCase();
          if (!ALLOWED_METHODS.has(verb)) {
             throw new Error(`Unknown verb "${verb}" for on()`);
@@ -99,42 +94,48 @@ export class PeerNode {
          }
       }
 
-      /* ---------- pattern normalisation ---------- */
-      const selfPrefix = `${this.nodeId}/${this.service}`;
+      // Normalize to absolute subject
+      const prefix = `${this.nodeId}/${this.service}`;
       if (pattern.startsWith('/')) {
-         // Relative form → expand to absolute
-         pattern = `${selfPrefix}${pattern}`;
+         pattern = `${prefix}${pattern}`;
       }
-
-      /* ---------- safety check ---------- */
-      if (!pattern.startsWith(selfPrefix)) {
-         // The user *probably* made a mistake – hard fail is safer.
+      if (!pattern.startsWith(prefix)) {
          console.error(
             `[PeerNode] Illegal subscription to foreign subject "${pattern}". ` +
-            `This node is "${selfPrefix}". Shutting down.`,
+            `This node is "${prefix}". Exiting.`,
          );
          process.exit(1);
       }
 
-      /* ---------- subscribe via bus ---------- */
+      // Subscribe and wrap data+msg into a single ctx
       this.bus.subscribe(pattern, async (data, rawMsg) => {
-         // Determine requested verb from headers (absent → “*”)
-         const reqVerb = rawMsg.headers?.get('method')?.toLowerCase?.() || '*';
+         // Build context object
+         const ctx = {
+            url: rawMsg.subject.replace(`${this.nodeId}/${this.service}`, ''), // e.g. "/player/stats"
+            subject: rawMsg.subject,
+            method: rawMsg.headers?.get('method') ?? '*',
+            headers: Object.fromEntries(rawMsg.headers ?? []),
+            traceId: rawMsg.headers?.get('traceId'),
+            payload: data,
+            raw: rawMsg,
+            reply: (response, hdr = {}) =>
+               rawMsg.reply && this.bus.publish(rawMsg.reply, response, { headers: hdr }),
+         };
 
+         // Verb check
+         const reqVerb = ctx.method.toLowerCase();
          if (verb !== '*' && verb !== reqVerb) {
-            // Wrong verb – reply with error (if a reply is expected) and log.
             const errMsg = `Method ${reqVerb.toUpperCase()} not allowed for ${pattern}`;
             if (rawMsg.reply && rawMsg.headers?.get('expectReply') === '1') {
-               // Use our own makeHeaders helper so traceId stays consistent.
                const headers = this.#makeHeaders('error', false, { status: 405 });
                await this.bus.publish(rawMsg.reply, { error: errMsg }, { headers });
             }
-            await logError(errMsg);
-            return;
+            return logError(errMsg);
          }
 
+         // Call the user's handler with a single ctx argument
          try {
-            return await handler(data, rawMsg);
+            return await handler(ctx);
          } catch (err) {
             await this.#handleError(err);
             if (rawMsg.reply && rawMsg.headers?.get('expectReply') === '1') {
