@@ -1,35 +1,64 @@
-// A minimal node
-// ────────────────────────────────────────
+// A minimal server
+// GC – Game-controller that exposes 4 routes via NodeRouter
+// ──────────────────────────────────────────────────────────
 import { PeerNode } from '../src/index.js';
 import { NodeRouter } from '../src/NodeRouter.js';
 
-const main = async () => {
-   const NODE_ID = 'n1'
-   const SERVICE_ID = 'gc'
-   const node = new PeerNode({ nodeId: NODE_ID, service: SERVICE_ID });
-   await node.connect();
+const NODE_ID = 'n1';
+const SERVICE = 'gc';
+const db = Object.create(null);     // poor-man's DB
 
-   /* -------- build routing table -------- */
+// helper: pretty print one-liners
+function log(ctx, msg, extra = {}) {
+   const { traceId, method, url } = ctx;
+   console.log(
+      `[${traceId}] ${method.toUpperCase().padEnd(1)} ${url.padEnd(3)} -`,
+      msg,
+      Object.keys(extra).length ? extra : ''
+   );
+}
+
+const main = async () => {
+   const gc = new PeerNode({ nodeId: NODE_ID, service: SERVICE });
+   await gc.connect();
+
    const router = new NodeRouter();
 
    router
+      /* ────── POST /unit/exp/add ────── */
       .use('post', '/unit/exp/add', async (ctx, { unitId, exp }) => {
-         console.log('post', '/unit/exp/add', unitId, exp);
-         /* … business logic … */
-         return { status: 'ok', url: '/unit/exp/add' }
+         const s = (db[unitId] ??= { level: 1, exp: 0 });
+         s.exp += exp;
+         while (s.exp >= 100) { s.exp -= 100; s.level++; }
+
+         log(ctx, 'XP added', { unitId, exp, state: s });
+         return { unitId, ...s };
       })
+
+      /* ────── POST /unit/expDouble/add ────── */
       .use('post', '/unit/expDouble/add', async (ctx, { unitId, exp }) => {
-         console.log('post', '/unit/expDouble/add', unitId, exp);
-         /* … business logic … */
-         return { status: 'ok', url: '/unit/expDouble/add' }
+         const s = (db[unitId] ??= { level: 1, exp: 0 });
+         s.exp += exp * 2;
+         while (s.exp >= 100) { s.exp -= 100; s.level++; }
+
+         log(ctx, 'XP doubled', { unitId, exp, state: s });
+         return { unitId, ...s };
       })
-      .use('get', '/health', () => ({ status: 'ok' }))
-      .use('*', '/debug', (ctx, { foo }) => ({ echo: foo }));
 
-   /* -------- bind to PeerNode -------- */
-   router.apply(node);
+      /* ────── GET /health ────── */
+      .use('get', '/health', ctx => {
+         log(ctx, 'health-check');
+         return { ok: true };
+      })
 
-   console.log(`Routes mounted. ${SERVICE_ID.toUpperCase()} is ready.`);
+      /* ────── * /debug ────── */
+      .use('*', '/debug', ctx => {
+         log(ctx, 'debug echo', ctx.payload);
+         return { echo: ctx.payload };
+      });
+
+   router.apply(gc);
+   console.log('GC routes mounted and ready.');
 };
 
 main().catch(console.error);
