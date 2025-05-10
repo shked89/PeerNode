@@ -45,25 +45,7 @@ export class NodeRouter {
          const table = this.routes[url];
          for (const method of Object.keys(table)) {
             const handler = table[method];
-
-            peer.on(method, url, (payload, msg) => {
-               // Build lightweight context object
-               const ctx = {
-                  url,                          // "/unit/exp/add"
-                  subject: msg.subject,         // "n1/gc/unit/exp/add"
-                  method: msg.headers?.get('method') ?? '*',
-                  headers: Object.fromEntries(msg.headers ?? []),
-                  traceId: msg.headers?.get('traceId'),
-                  payload,                      // payload data
-                  raw: msg,
-                  /** Helper for manual replies (rarely used) */
-                  reply: (data, hdr = {}) =>
-                     msg.reply && peer.bus.publish(msg.reply, data, { headers: hdr }),
-               };
-
-               /* Invoke the user handler – ctx-first API */
-               return handler(ctx);
-            });
+            peer.on(method, url, handler);
          }
       }
    }
