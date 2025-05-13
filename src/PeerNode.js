@@ -7,7 +7,7 @@ import { logError } from './utils/logger.js';
 const ALL_SYNC_METHODS = ['get', 'post', 'put', 'patch', 'delete'];
 const ALL_ASYNC_METHODS = [
    'start', 'step', 'finish', 'fail', 'cancel', // like state machine
-   'call', 'emit'
+   'call', 'emit', 'stream'
 ];
 
 const ALLOWED_SYNC_METHODS = new Set(ALL_SYNC_METHODS);
@@ -28,7 +28,7 @@ export class PeerNode {
     * @param {number}  [opts.defaultTimeout=1000]   request timeout (ms)
     * @param {function} [opts.errorHandler]         global async error callback
     */
-   constructor({ nodeId, service, bus = new NatsAdapter(), defaultTimeout = 1_000, errorHandler = null }) {
+   constructor({ nodeId, service, bus = new NatsAdapter(), defaultTimeout = 10_000, errorHandler = null }) {
       if (!nodeId || !service) throw new Error('nodeId and service are required');
       this.nodeId = String(nodeId).toLowerCase();
       this.service = String(service).toLowerCase();
@@ -77,9 +77,12 @@ export class PeerNode {
     * @param {any} rawMsg - Original NATS message object
     * @param {string} prefix - Subject prefix (e.g., "n1/gc")
     * @param {Function} handler - Registered handler for the route
+    * @param {object} params - skipRouteCheck
     */
-   async #onMsg(data, rawMsg, prefix, handler) {
+   async #onMsg(data, rawMsg, prefix, handler, params = {}) {
       const headers = {};
+      const skipRouteCheck = params?.skipRouteCheck
+
       if (rawMsg?.headers) {
          for (const key of rawMsg.headers.keys()) {
             headers[key] = rawMsg.headers.get(key);
@@ -105,10 +108,10 @@ export class PeerNode {
       const routeKey = subject;
 
       // If this route is not registered at all - 405
-      if (!this.routeSet.has(routeKey)) {
+      if (!skipRouteCheck && !this.routeSet.has(routeKey)) {
          let errMsg = '';
          if (rawMsg.reply && headers?.expectReply === '1') {
-            const headers = this.#makeHeaders('error', false, { status: 405 });
+            const headers = this.#makeHeaders('error', false, { res: 405 });
             await this.bus.publish(rawMsg.reply, { error: errMsg }, { headers });
          }
          return logError(errMsg);
@@ -120,7 +123,7 @@ export class PeerNode {
       } catch (err) {
          await this.#handleError(err);
          if (rawMsg.reply && rawMsg.headers?.get('expectReply') === '1') {
-            const headers = this.#makeHeaders('error', false, { status: 500 });
+            const headers = this.#makeHeaders('error', false, { res: 500 });
             return { error: err.message ?? 'Internal server error' };
          }
       }
@@ -241,13 +244,16 @@ export class PeerNode {
     * @param {function} handler
     */
    onExternal(pattern, handler) {
-      if (!/^n\d+\/[A-Za-z0-9_-]+\/.+/.test(pattern)) {
-         throw new Error(
-            `External pattern must be absolute (n<id>/<service>/path), got "${pattern}"`
-         );
-      }
-      this.bus.subscribe(pattern, handler);
-      return this
+      pattern = String(pattern).toLowerCase();
+
+      // Subscribe and wrap into ctx via #onMsg skip route-set validation.
+      this.bus.subscribe(pattern, async (data, rawMsg) => {
+         return this.#onMsg(data, rawMsg, '', handler, {
+            skipRouteCheck: true
+         });
+      });
+
+      return this;
    }
 
    #assertAbsolute(url) {
@@ -290,7 +296,7 @@ export class PeerNode {
       return await this.bus.request(fullUrl, payload, { headers, timeout })
          .catch(err => {
             this.#handleError(err, opts.onError)
-            return { status: parseInt(err.code || 500, 10) }
+            return { res: parseInt(err.code || 500, 10) }
          });
    }
 
