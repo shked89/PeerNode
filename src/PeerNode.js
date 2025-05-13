@@ -55,12 +55,15 @@ export class PeerNode {
    send(method, url, payload = {}, opts = {}) {
       method = String(method).toLowerCase();
       url = String(url).toLowerCase();
-      if (ALLOWED_METHODS.has(method)) {
-         return this.#async(method, url, payload, opts);
-      }
-      // if (ALLOWED_ASYNC_METHODS.has(method)) {
+      // if (ALLOWED_METHODS.has(method)) {
       //    return this.#async(method, url, payload, opts);
       // }
+      if (ALLOWED_SYNC_METHODS.has(method)) {
+         return this.#sync(method, url, payload, opts);
+      }
+      if (ALLOWED_ASYNC_METHODS.has(method)) {
+         return this.#async(method, url, payload, opts);
+      }
       throw new Error(`Unknown verb "${method}"`);
    }
 
@@ -278,7 +281,7 @@ export class PeerNode {
    }
 
    /**
-    * Internal method to perform a request-reply interaction over the bus.
+    * Internal sync method to perform a request-reply interaction over the bus.
     * 
     * Constructs headers and invokes `bus.request()` on a derived subject.
     * Automatically calls error handler if request fails.
@@ -289,15 +292,36 @@ export class PeerNode {
     * @param {object} opts - Optional settings like timeout, headers, onError
     * @returns {Promise<any>} Response or error wrapper
     */
-   async #async(method, url, payload, opts) {
-      const headers = this.#makeHeaders(method, true, url, opts.headers);
+   async #sync(method, url, payload, opts) {
+      const headers = this.#makeHeaders(method, /*expectReply=*/true, url, opts.headers);
       const timeout = opts.timeout ?? this.defaultTimeout;
       const fullUrl = `${this.#assertAbsolute(url)}--${method}`;
-      return await this.bus.request(fullUrl, payload, { headers, timeout })
-         .catch(err => {
-            this.#handleError(err, opts.onError)
-            return { res: parseInt(err.code || 500, 10) }
-         });
+      try {
+         return await this.bus.request(fullUrl, payload, { headers, timeout });
+      } catch (err) {
+         await this.#handleError(err, opts.onError);
+         return { res: parseInt(err.code || 500, 10) };
+      }
+   }
+
+   /**
+    *  Asynchronous fire-and-forget publish.
+    *  Returns `undefined` (or whatever the bus adapter returns).
+    * 
+    * @param {string} method - HTTP-like method (e.g., "get", "patch")
+    * @param {string} url - Fully qualified subject (e.g., "n1/gc/unit")
+    * @param {any} payload - Message body
+    * @param {object} opts - Optional settings like timeout, headers, onError
+    * @returns {any}
+    */
+   #async(method, url, payload, opts) {
+      const headers = this.#makeHeaders(method, /*expectReply=*/false, url, opts.headers);
+      const fullUrl = `${this.#assertAbsolute(url)}--${method}`;
+      try {
+         return this.bus.publish(fullUrl, payload, { headers });
+      } catch (err) {
+         this.#handleError(err, opts.onError);
+      }
    }
 
    /**
